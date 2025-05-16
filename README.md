@@ -44,7 +44,13 @@ Example:
 ```bash
 python out.py --dataset ICEWS14 --train_file train --threshold 0.01
 ```
+### Final processing of the dataset
 
+Place data-input.py into the dataset folder to be trained. For example, if you need to train the ICEWS14 dataset, put data-input.py into the ICEWS14 folder and run the following code
+
+```bash
+cd ICEWS14
+python data-input.py
 
 
 ## Dataset Preparation
