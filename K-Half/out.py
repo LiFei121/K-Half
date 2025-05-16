@@ -119,8 +119,6 @@ def main():
 
     save_facts(file_path, filtered_facts)
 
-    output_file_path = f'data/{args.dataset}/{args.train_file}_output.txt'
-    save_all_output(output_file_path, output_data)
 
 
 if __name__ == "__main__":
