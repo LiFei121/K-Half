@@ -51,15 +51,17 @@ Place data-input.py into the dataset folder to be trained. For example, if you n
 ```bash
 cd ICEWS14
 python data-input.py
-
-
-## Dataset Preparation
-
-Navigate to the `data` directory and transfer the dataset to the model you want to run:
-
-```bash
-cd data
-# Place your dataset files here
 ```
 
-Ensure your dataset is formatted correctly before running the model.
+This dataset is the processed dataset and can be replaced with the dataset of the model you want to use，We have put the link to the Baseline model used in the paper below for readers to use:
+
+CYGNet：https://github.com/CunchaoZ/CyGNet
+
+xERTE：https://github.com/TemporalKGTeam/xERTE
+
+REGCN：https://github.com/Lee-zix/RE-GCN
+
+CENET：https://github.com/xyjigsaw/CENET
+
+LogCL：https://github.com/WeiChen3690/LogCL
+
