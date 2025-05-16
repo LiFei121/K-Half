@@ -21,6 +21,17 @@ Example:
 ```bash
 python label.py --dataset ICEWS14
 ```
+### Training the Model
+
+```bash
+python train.py --dataset <DATASET_NAME> --train_file <train|test|valid> --entity_out_dim_1 <DIM> --entity_out_dim_2 <DIM> --epochs <NUM_EPOCHS> --batch <BATCH_SIZE> --threshold <THRESHOLD>
+```
+
+Example:
+
+```bash
+python train.py --dataset ICEWS14 --train_file train --entity_out_dim_1 32 --entity_out_dim_2 32 --epochs 50 --batch 5000 --threshold 0
+```
 
 ### Generating Output
 
@@ -34,17 +45,7 @@ Example:
 python out.py --dataset ICEWS14 --train_file train --threshold 0.01
 ```
 
-### Training the Model
 
-```bash
-python train.py --dataset <DATASET_NAME> --train_file <train|test|valid> --entity_out_dim_1 <DIM> --entity_out_dim_2 <DIM> --epochs <NUM_EPOCHS> --batch <BATCH_SIZE> --threshold <THRESHOLD>
-```
-
-Example:
-
-```bash
-python train.py --dataset ICEWS14 --train_file train --entity_out_dim_1 32 --entity_out_dim_2 32 --epochs 50 --batch 5000 --threshold 0
-```
 
 ## Dataset Preparation
 
