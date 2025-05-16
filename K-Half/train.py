@@ -7,6 +7,7 @@ import argparse
 import torch.nn.functional as F
 from collections import Counter
 import matplotlib.pyplot as plt
+import time
 
 def get_args():
     parser = argparse.ArgumentParser(description="GCN for fact classification")
@@ -16,7 +17,7 @@ def get_args():
     parser.add_argument('--entity_out_dim_1', type=int, default=128, help='Entity output embedding dimension (layer 1)')
     parser.add_argument('--entity_out_dim_2', type=int, default=128, help='Entity output embedding dimension (layer 2)')
     parser.add_argument('--h_dim', type=int, default=32, help='Dimension of time embeddings')
-    parser.add_argument('--num_ents', type=int, default=8000, help='Number of entities')
+    parser.add_argument('--num_ents', type=int, default=10000, help='Number of entities')
     parser.add_argument('--nheads_GAT_1', type=int, default=4, help='Number of GAT heads (layer 1)')
     parser.add_argument('--nheads_GAT_2', type=int, default=4, help='Number of GAT heads (layer 2)')
     parser.add_argument('--n_hidden', type=int, default=128, help='Hidden layer dimension for GCN')
@@ -27,8 +28,15 @@ def get_args():
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate for optimizer')
     parser.add_argument('--batch', type=int, default=10000, help='batch_size')
     parser.add_argument('--threshold', type=int, default=250, help='Threshold for minimum occurrences')
+    parser.add_argument('--gpu', type=int, default=None,
+                        help='GPU device ID to use (default: use CPU if not specified)')
     return parser.parse_args()
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+args = get_args()
+if args.gpu is not None and torch.cuda.is_available():
+    device = torch.device(f"cuda:{args.gpu}")
+else:
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
 
 def count_second_column_occurrences(file_path):
     with open(file_path, 'r') as file:
@@ -111,7 +119,8 @@ def create_entity_id_map(train_file):
                 entity_id_map[tail_entity] = current_index
                 current_index += 1
 
-    return entity_id_map
+    actual_num_ents = current_index
+    return entity_id_map, actual_num_ents
 
 
 def construct_graph(facts):
@@ -133,11 +142,11 @@ def construct_graph(facts):
 
 def generate_fact_embeddings(facts, entity_emb, relation_dict, his_temp_embs=None):
     fact_embeddings = []
-    for i, (head, relation_id, tail, _) in enumerate(facts):
+    for local_idx, (head, relation_id, tail, _) in enumerate(facts):
         entity_emb_head = entity_emb[head]
         entity_emb_tail = entity_emb[tail]
         relation_emb = relation_dict[relation_id]
-        time_emb = his_temp_embs[i][head]
+        time_emb = his_temp_embs[local_idx][local_idx]
 
         fact_emb = torch.cat([entity_emb_head, entity_emb_tail, relation_emb, time_emb], dim=0)
 
@@ -180,6 +189,7 @@ def create_reverse_entity_id_map(entity_id_map):
 
 
 def main(args):
+    total_training_time = 0.0
     file_path = f'data/{args.dataset}/{args.train_file}.txt'
     occurrences = count_second_column_occurrences(file_path)
     filtered_occurrences = remove_less_than_threshold(occurrences, args.threshold)
@@ -187,56 +197,71 @@ def main(args):
     overwrite_file_with_filtered(file_path, filtered_occurrences)
     print(f"File filtered and overwritten: {file_path}")
 
-    entity_id_map = create_entity_id_map(file_path)
+    entity_id_map, actual_num_ents = create_entity_id_map(file_path)
+    args.num_ents = actual_num_ents
     reverse_entity_id_map = create_reverse_entity_id_map(entity_id_map)
 
     relation_dict, relation_labels = load_relation_data(f'data/{args.dataset}/relation2id.txt', file_path, args.entity_out_dim_1)
-    facts = load_train_data(file_path, entity_id_map)
 
-    initial_entity_emb = torch.randn(args.num_ents, args.initial_entity_emb_dim)
+    facts = load_train_data(file_path, entity_id_map)
+    initial_entity_emb = torch.randn(args.num_ents, args.initial_entity_emb_dim).to(device)
+    relation_dict = {k: v.to(device) for k, v in relation_dict.items()}
     entity_out_dim = [args.entity_out_dim_1, args.entity_out_dim_2]
     nheads_GAT = [args.nheads_GAT_1, args.nheads_GAT_2]
     k_half_model = K_Half(initial_entity_emb, entity_out_dim, args.h_dim, args.num_ents, nheads_GAT,
-                          relation_dict=relation_dict)
+                          relation_dict=relation_dict).to(device)
 
-    edge_list = torch.tensor([[fact[0], fact[2]] for fact in facts]).t()
-    edge_type = torch.tensor([fact[1] for fact in facts])
+    edge_list = torch.tensor([[fact[0], fact[2]] for fact in facts]).t().to(device)
+    edge_type = torch.tensor([fact[1] for fact in facts]).to(device)
 
     all_predictions = []
     batch_size = args.batch
+    num_batches = (len(facts) + batch_size - 1) // batch_size
+    batches = [facts[i * batch_size: (i + 1) * batch_size] for i in range(num_batches)]
     num_edges = edge_list.shape[1]
 
     train_losses = []
     val_losses = []
     val_accuracies = []
 
-    for start in range(0, num_edges, batch_size):
-        end = min(start + batch_size, num_edges)
+    for batch_idx, batch in enumerate(batches):
+        start = batch_idx * batch_size
+        end = start + len(batch)
         edge_list_batch = edge_list[:, start:end]
         edge_type_batch = edge_type[start:end]
-        batch_inputs = torch.tensor([[fact[0], fact[1], fact[2], fact[3]] for fact in facts[start:end]])
 
-        entity_emb, his_temp_embs = k_half_model(Corpus_=None, batch_inputs=batch_inputs, edge_list=edge_list_batch,
-                                                 edge_type=edge_type_batch)
+        batch_inputs = torch.tensor([[fact[0], fact[1], fact[2], fact[3]] for fact in batch]).to(device)
 
-        fact_embeddings = generate_fact_embeddings(facts[start:end], entity_emb, relation_dict, his_temp_embs)
+        entity_emb, his_temp_embs = k_half_model(
+            Corpus_=None,
+            batch_inputs=batch_inputs,
+            edge_list=edge_list_batch,
+            edge_type=edge_type_batch
+        )
 
-        labels = torch.tensor([relation_labels[fact[1]] for fact in facts[start:end]])
 
-        train_idx, test_idx = train_test_split(list(range(len(facts[start:end]))), test_size=0.2, random_state=42)
+        fact_embeddings = generate_fact_embeddings(batch, entity_emb, relation_dict, his_temp_embs)
+
+        labels = torch.tensor([relation_labels[fact[1]] for fact in batch], device=device)
+
+        train_idx, test_idx = train_test_split(list(range(len(batch))), test_size=0.2, random_state=42)
         train_idx, val_idx = train_test_split(train_idx, test_size=0.25, random_state=42)
 
-        g = construct_graph(facts[start:end])
+        g = construct_graph(batch).to(device)
 
         gcn_model = GCN(g, in_feats=fact_embeddings.shape[1], n_hidden=args.n_hidden, n_classes=args.n_classes,
-                        n_layers=args.n_layers, activation=F.relu, dropout=args.dropout)
+                        n_layers=args.n_layers, activation=F.relu, dropout=args.dropout).to(device)
 
         optimizer = torch.optim.Adam(gcn_model.parameters(), lr=args.lr)
 
         for epoch in range(args.epochs):
+            torch.cuda.empty_cache()
+            start_time = time.time()
             gcn_model.train()
             logits = gcn_model(fact_embeddings)
-            loss = F.cross_entropy(logits[train_idx], labels[train_idx])
+
+
+            loss = F.cross_entropy(logits[train_idx], labels[train_idx].long())
 
             optimizer.zero_grad()
             loss.backward(retain_graph=True)
@@ -247,13 +272,14 @@ def main(args):
                 val_logits = gcn_model(fact_embeddings)
                 val_loss = F.cross_entropy(val_logits[val_idx], labels[val_idx])
                 val_accuracy = compute_accuracy(val_logits[val_idx], labels[val_idx])
-
             train_losses.append(loss.item())
             val_losses.append(val_loss.item())
             val_accuracies.append(val_accuracy)
-
-            print(
-                f'Epoch {epoch}, Train Loss: {loss.item()}, Val Loss: {val_loss.item()}, Val Accuracy: {val_accuracy * 100:.2f}%')
+            epoch_time = time.time() - start_time
+            total_training_time += epoch_time
+            print(f'Epoch {epoch}, Time: {epoch_time:.2f}s, Total: {total_training_time:.2f}s, '
+                  f'Train Loss: {loss.item():.4f}, Val Loss: {val_loss.item():.4f}, '
+                  f'Val Accuracy: {val_accuracy * 100:.2f}%')
 
             if val_accuracy == 1.0:
                 print("Validation accuracy reached 100%, stopping training early.")
@@ -261,11 +287,15 @@ def main(args):
 
             gcn_model.eval()
 
+
         with torch.no_grad():
             predictions = torch.argmax(gcn_model(fact_embeddings), dim=1)
             all_predictions.extend(predictions.tolist())
 
     write_predictions_to_file(facts, all_predictions, args.dataset, args.train_file, reverse_entity_id_map)
+    print(f"\nTotal training time: {total_training_time:.2f} seconds")
+
+
 
 
 
