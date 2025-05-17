@@ -51,7 +51,7 @@ Place data-input.py into the dataset folder to be trained. For example, if you n
 cd data/ICEWS14
 python data-input.py
 ```
-The dataset at this point is the dataset after filtering for outdated knowledge
+After processing the datasets in the former steps, the dataset at this stage is the filtered version with outdated facts being removed. To verify our assumption that outdated facts actually have a negative impact on the performance of TKGs reasoning, we conduct reasoning experiments on these datasets.
 
 ### Reasoing over Temporal Knowledge Graphs
 
