@@ -48,7 +48,7 @@ python out.py --dataset ICEWS14 --train_file train --threshold 0.01
 Place data-input.py into the dataset folder to be trained. For example, if you need to train the ICEWS14 dataset, put data-input.py into the ICEWS14 folder and run the following code
 
 ```bash
-cd ICEWS14
+cd data/ICEWS14
 python data-input.py
 ```
 The dataset at this point is the dataset after filtering for outdated knowledge
