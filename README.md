@@ -33,7 +33,7 @@ Example:
 python train.py --dataset ICEWS14 --train_file train --entity_out_dim_1 32 --entity_out_dim_2 32 --epochs 50 --batch 5000 --threshold 0
 ```
 
-### Generating Output
+### Process of Filtering Outdated Facts 
 
 ```bash
 python out.py --dataset <DATASET_NAME> --train_file <train|test|valid> --threshold <VALIDITY_THRESHOLD>
