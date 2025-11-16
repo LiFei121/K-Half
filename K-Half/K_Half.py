@@ -93,7 +93,7 @@ class K_Half(nn.Module):
 
         out_entity_1, _ = self.sparse_gat_1(self.entity_embeddings, edge_embed, edge_list, edge_type, edge_embed)
 
-
+        # 把实体嵌入矩阵的每一行（每个实体向量）按 L2 范数归一化，使得每个实体向量长度为 1，.detach()从当前计算图中分离，得到一个不带梯度的张量。
         self.entity_embeddings.data = F.normalize(self.entity_embeddings.data, p=2, dim=1).detach()
 
         his_temp_embs = []
@@ -103,14 +103,14 @@ class K_Half(nn.Module):
 
             his_temp_embs.append(h_t[batch_inputs[:, 0].long()])
 
-
+        # 取出本批次所有事实的尾实体 ID，并去重，得到当前需要更新的实体索引。
         mask_indices = torch.unique(batch_inputs[:, 2]).to(self.entity_embeddings.device).long()
-        mask = torch.zeros(self.entity_embeddings.shape[0], device=self.entity_embeddings.device)
+        mask = torch.zeros(self.entity_embeddings.shape[0], device=self.entity_embeddings.device)#构造一个长度为实体总数的掩码向量，对应实体出现则置 1，否则 0。
         mask[mask_indices] = 1.0
 
         entities_upgraded = self.entity_embeddings.mm(self.W_entities)
-        out_entity_1 = entities_upgraded + mask.unsqueeze(-1).expand_as(out_entity_1) * out_entity_1
+        out_entity_1 = entities_upgraded + mask.unsqueeze(-1).expand_as(out_entity_1) * out_entity_1 # 只更新当前批次出现的目标实体
 
         out_entity_1 = F.normalize(out_entity_1, p=2, dim=1)
-
+        # 只更新涉及的实体，同时保持所有实体嵌入在单位球上。
         return out_entity_1, his_temp_embs

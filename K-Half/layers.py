@@ -73,12 +73,12 @@ class SpGraphAttentionLayer(nn.Module):
         N = input.size()[0]
 
         # Self-attention on the nodes - Shared attention mechanism
-
+        # 拼接特征
         edge_h = torch.cat(
             (input[edge[0, :], :], input[edge[1, :], :], edge_embed[:, :]), dim=1).t()
         # edge_h: (2*in_dim + nrela_dim) x E
 
-        edge_m = self.a.mm(edge_h)
+        edge_m = self.a.mm(edge_h) # edge_h和self.a的矩阵做乘法
         # edge_m: D * E
 
         # to be checked later
@@ -86,7 +86,7 @@ class SpGraphAttentionLayer(nn.Module):
         edge_e = torch.exp(powers).unsqueeze(1)
         assert not torch.isnan(edge_e).any()
         # edge_e: E
-
+        # 调用结果相当于把每条边的权重加到其目标节点上，得到每个节点所有入边权重和
         e_rowsum = self.special_spmm_final(
             edge, edge_e, N, edge_e.shape[0], 1)
         e_rowsum[e_rowsum == 0.0] = 1e-12

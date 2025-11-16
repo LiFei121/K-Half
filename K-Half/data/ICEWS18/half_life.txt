@@ -1,0 +1,2 @@
+short_half_life=632.1668852697226
+long_half_life=770.8342845069151

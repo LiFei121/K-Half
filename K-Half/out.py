@@ -12,7 +12,7 @@ def load_train_data(train_file):
             head_entity = int(cols[0])
             relation_id = int(cols[1])
             tail_entity = int(cols[2])
-            timestamp = float(cols[3])
+            timestamp = int(float(cols[3]))
             label = int(cols[4])
 
             facts.append((head_entity, relation_id, tail_entity, timestamp, label))
@@ -57,7 +57,7 @@ def filter_facts(facts, threshold, short_half_life, long_half_life):
         fact_group.sort(key=lambda x: x[3], reverse=True)
         latest_fact = fact_group[0]
         t0 = latest_fact[3]
-        V0 = 1
+        V0 = 1 # 初始有效性
 
         output_data += f"Latest fact: {latest_fact}, using this fact as reference for comparison.\n"
 
@@ -73,7 +73,7 @@ def filter_facts(facts, threshold, short_half_life, long_half_life):
                 half_life = short_half_life
             else:
                 half_life = long_half_life
-
+            # V0 * exp(-λ |t|) 计算有效性
             V = calculate_effectiveness(V0, t, half_life)
             output_data += f"Fact: {fact}, Time difference (t): {t}, Effectiveness: {V}\n"
 
@@ -105,9 +105,9 @@ def load_half_life(filename):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, required=True)
-    parser.add_argument('--train_file', type=str, required=True)
-    parser.add_argument('--threshold', type=float, required=True, help="validity threshold")
+    parser.add_argument('--dataset', type=str, default="ICEWS14")
+    parser.add_argument('--train_file', type=str, default="train")
+    parser.add_argument('--threshold', type=float, default=0.01, help="validity threshold")
     args = parser.parse_args()
 
     file_path = f'data/{args.dataset}/{args.train_file}.txt'

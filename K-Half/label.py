@@ -6,7 +6,7 @@ import argparse
 
 def get_args():
     parser = argparse.ArgumentParser(description="GCN for fact classification")
-    parser.add_argument('--dataset', type=str, default='GDELT', help='Dataset name')
+    parser.add_argument('--dataset', type=str, default='ICEWS14', help='Dataset name')
     return parser.parse_args()
 
 
@@ -18,8 +18,8 @@ def read_and_group_data(filename):
             for row in reader:
                 if len(row) < 4:
                     continue
-                head, relation, tail, timestamp = row[0], row[1], row[2], int(row[3])
-                data[(head, relation)].append((tail, timestamp))
+                head, relation, tail, timestamp = row[0], row[1], row[2], float(row[3])
+                data[(head, relation)].append((tail, int(timestamp)))
     except FileNotFoundError:
         print(f"Error: File {filename} not found.")
     except Exception as e:
@@ -42,6 +42,8 @@ def find_mean(differences):
 
 
 def calculate_median(sorted_avg_means):
+    if len(sorted_avg_means) == 0:
+        return 0
     median_index = len(sorted_avg_means) // 2
     if len(sorted_avg_means) % 2 == 0:
         return (sorted_avg_means[median_index - 1][1] + sorted_avg_means[median_index][1]) / 2
@@ -65,10 +67,10 @@ def process_data(train_filename):
             avg_mean = sum(means) / len(means)
             final_result[relation] = avg_mean
 
-    sorted_avg_means = sorted(final_result.items(), key=lambda x: (x[1] == 0, x[1]))
+    sorted_avg_means = sorted(final_result.items(), key=lambda x: (x[1] == 0, x[1])) #非零值在前，且按值从小到大；零值在后
 
-    non_zero_avg_means = [item for item in sorted_avg_means if item[1] > 0]
-    median = calculate_median(non_zero_avg_means)
+    non_zero_avg_means = [item for item in sorted_avg_means if item[1] > 0] #过滤零值
+    median = calculate_median(non_zero_avg_means) #取中位数
 
     print("Average timestamp for each relationship:")
     for relation, avg_mean in sorted_avg_means:

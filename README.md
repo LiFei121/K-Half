@@ -69,3 +69,8 @@ LogCL：https://github.com/WeiChen3690/LogCL
 
 Replace the dataset obtained in the previous step that filters out outdated knowledge with the original dataset in the folder of the model you want to use, make sure that the filename and format are the same, and then just run the training step for that model normally.
 
+ICEWS14:
+
+train:74845
+valid:8514
+test:7371

@@ -11,11 +11,11 @@ import time
 
 def get_args():
     parser = argparse.ArgumentParser(description="GCN for fact classification")
-    parser.add_argument('--dataset', type=str, default='GDELT', help='Dataset name')
+    parser.add_argument('--dataset', type=str, default='ICEWS14', help='Dataset name')
     parser.add_argument('--train_file', type=str, default='train', help='train、test、valid')
     parser.add_argument('--initial_entity_emb_dim', type=int, default=128, help='Dimension of initial entity embeddings')
-    parser.add_argument('--entity_out_dim_1', type=int, default=128, help='Entity output embedding dimension (layer 1)')
-    parser.add_argument('--entity_out_dim_2', type=int, default=128, help='Entity output embedding dimension (layer 2)')
+    parser.add_argument('--entity_out_dim_1', type=int, default=32, help='Entity output embedding dimension (layer 1)')
+    parser.add_argument('--entity_out_dim_2', type=int, default=32, help='Entity output embedding dimension (layer 2)')
     parser.add_argument('--h_dim', type=int, default=32, help='Dimension of time embeddings')
     parser.add_argument('--num_ents', type=int, default=10000, help='Number of entities')
     parser.add_argument('--nheads_GAT_1', type=int, default=4, help='Number of GAT heads (layer 1)')
@@ -26,16 +26,44 @@ def get_args():
     parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate for GCN')
     parser.add_argument('--epochs', type=int, default=50, help='Number of epochs to train')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate for optimizer')
-    parser.add_argument('--batch', type=int, default=10000, help='batch_size')
-    parser.add_argument('--threshold', type=int, default=250, help='Threshold for minimum occurrences')
+    parser.add_argument('--batch', type=int, default=5000, help='batch_size')
+    parser.add_argument('--threshold', type=int, default=0, help='Threshold for minimum occurrences')
     parser.add_argument('--gpu', type=int, default=None,
                         help='GPU device ID to use (default: use CPU if not specified)')
     return parser.parse_args()
 args = get_args()
+
+# Check if DGL supports CUDA
+def check_dgl_cuda_support():
+    """Check if DGL is installed with CUDA support"""
+    try:
+        import dgl
+        # Try to create a small graph and move it to CUDA to test
+        if torch.cuda.is_available():
+            test_g = dgl.graph(([], []))
+            test_g.add_nodes(1)
+            try:
+                test_g = test_g.to(torch.device("cuda"))
+                # Clean up
+                del test_g
+                return True
+            except Exception:
+                return False
+        return False
+    except Exception:
+        return False
+
+# Determine device
 if args.gpu is not None and torch.cuda.is_available():
     device = torch.device(f"cuda:{args.gpu}")
 else:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# If using CUDA but DGL doesn't support it, fall back to CPU
+if device.type == "cuda" and not check_dgl_cuda_support():
+    print("Warning: DGL does not support CUDA. Falling back to CPU.")
+    device = torch.device("cpu")
+
 print(f"Using device: {device}")
 
 def count_second_column_occurrences(file_path):
@@ -95,7 +123,7 @@ def load_train_data(train_file, entity_id_map):
     with open(train_file, 'r') as f:
         for line in f:
             cols = line.strip().split('\t')
-            head_entity, relation_id, tail_entity, timestamp = int(cols[0]), int(cols[1]), int(cols[2]), float(cols[3])
+            head_entity, relation_id, tail_entity, timestamp = int(cols[0]), int(cols[1]), int(cols[2]), int(float(cols[3]))
 
             if head_entity in entity_id_map and tail_entity in entity_id_map:
                 mapped_head = entity_id_map[head_entity]
@@ -124,6 +152,15 @@ def create_entity_id_map(train_file):
 
 
 def construct_graph(facts):
+    # Lazy import DGL
+    try:
+        import dgl
+    except ImportError as e:
+        raise ImportError(
+            f"DGL library is required but could not be imported: {e}\n"
+            "Please install DGL with: pip install dgl"
+        )
+    
     g = dgl.graph(([], []))
     g.add_nodes(len(facts))
 
@@ -191,20 +228,20 @@ def create_reverse_entity_id_map(entity_id_map):
 def main(args):
     total_training_time = 0.0
     file_path = f'data/{args.dataset}/{args.train_file}.txt'
-    occurrences = count_second_column_occurrences(file_path)
+    occurrences = count_second_column_occurrences(file_path)# 统计每个关系的出现次数
     filtered_occurrences = remove_less_than_threshold(occurrences, args.threshold)
     print_occurrences(filtered_occurrences)
-    overwrite_file_with_filtered(file_path, filtered_occurrences)
+    overwrite_file_with_filtered(file_path, filtered_occurrences) #用过滤过后的数据覆盖原来的训练数据
     print(f"File filtered and overwritten: {file_path}")
 
-    entity_id_map, actual_num_ents = create_entity_id_map(file_path)
+    entity_id_map, actual_num_ents = create_entity_id_map(file_path) #在训练数据中统计每个实体的id map
     args.num_ents = actual_num_ents
     reverse_entity_id_map = create_reverse_entity_id_map(entity_id_map)
-
+    # relation_dict:初始化关系的embedding，relation_labels:关系对应的长期和短期标签
     relation_dict, relation_labels = load_relation_data(f'data/{args.dataset}/relation2id.txt', file_path, args.entity_out_dim_1)
 
-    facts = load_train_data(file_path, entity_id_map)
-    initial_entity_emb = torch.randn(args.num_ents, args.initial_entity_emb_dim).to(device)
+    facts = load_train_data(file_path, entity_id_map) #获取四元组
+    initial_entity_emb = torch.randn(args.num_ents, args.initial_entity_emb_dim).to(device)#初始化实体embedding
     relation_dict = {k: v.to(device) for k, v in relation_dict.items()}
     entity_out_dim = [args.entity_out_dim_1, args.entity_out_dim_2]
     nheads_GAT = [args.nheads_GAT_1, args.nheads_GAT_2]
@@ -215,23 +252,30 @@ def main(args):
     edge_type = torch.tensor([fact[1] for fact in facts]).to(device)
 
     all_predictions = []
-    batch_size = args.batch
-    num_batches = (len(facts) + batch_size - 1) // batch_size
-    batches = [facts[i * batch_size: (i + 1) * batch_size] for i in range(num_batches)]
-    num_edges = edge_list.shape[1]
+    batch_size = args.batch # batch的大小
+    num_batches = (len(facts) + batch_size - 1) // batch_size #计算有多少个batches
+    batches = [facts[i * batch_size: (i + 1) * batch_size] for i in range(num_batches)] #按上一行算出的批次数把 facts 列表切分成多个子列表，每个子列表就是一个批次。
+    num_edges = edge_list.shape[1] # 边的数量
+
+    print(f"\nTotal facts: {len(facts)}")
+    print(f"Batch size: {batch_size}")
+    print(f"Total batches: {num_batches}\n")
 
     train_losses = []
     val_losses = []
     val_accuracies = []
 
     for batch_idx, batch in enumerate(batches):
+        print(f"\n{'='*60}")
+        print(f"Processing Batch {batch_idx + 1}/{num_batches} (size: {len(batch)})")
+        print(f"{'='*60}\n")
         start = batch_idx * batch_size
         end = start + len(batch)
         edge_list_batch = edge_list[:, start:end]
         edge_type_batch = edge_type[start:end]
 
         batch_inputs = torch.tensor([[fact[0], fact[1], fact[2], fact[3]] for fact in batch]).to(device)
-
+        # entity_emb是经过注意力机制的实体embedding，his_temp_embs是时间的embedding
         entity_emb, his_temp_embs = k_half_model(
             Corpus_=None,
             batch_inputs=batch_inputs,
@@ -239,11 +283,11 @@ def main(args):
             edge_type=edge_type_batch
         )
 
-
+        # 对事实进行embedding
         fact_embeddings = generate_fact_embeddings(batch, entity_emb, relation_dict, his_temp_embs)
-
+        # 长期和短期事实
         labels = torch.tensor([relation_labels[fact[1]] for fact in batch], device=device)
-
+        # 训练集：0.8 × 0.75 = 60%；验证集：0.8 × 0.25 = 20%；测试集：20%
         train_idx, test_idx = train_test_split(list(range(len(batch))), test_size=0.2, random_state=42)
         train_idx, val_idx = train_test_split(train_idx, test_size=0.25, random_state=42)
 
@@ -285,7 +329,7 @@ def main(args):
                 print("Validation accuracy reached 100%, stopping training early.")
                 break
 
-            gcn_model.eval()
+            #gcn_model.eval()
 
 
         with torch.no_grad():
